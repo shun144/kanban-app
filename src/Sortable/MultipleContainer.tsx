@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal, unstable_batchedUpdates } from 'react-dom';
+// import { restrictToParentElement } from '@dnd-kit/modifiers';
+
 import {
   CancelDrop,
   closestCenter,
@@ -34,11 +36,8 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { coordinateGetter as multipleContainersCoordinateGetter } from './multipleContainersKeyboardCoordinates';
-
 import { Item, Container, ContainerProps } from '../components';
-
 import { createRange } from '../utilities';
-
 export default {
   title: 'Presets/Sortable/Multiple Containers',
 };
@@ -55,6 +54,7 @@ const animateLayoutChanges: AnimateLayoutChanges = (args) =>
     // wasDragging:要素がドラッグされ終わった後の状態に対してアニメーションを適用する 
     wasDragging: true
   });
+
 
 function DroppableContainer({
   children,
@@ -127,9 +127,13 @@ const dropAnimation: DropAnimation = {
       active: {
         opacity: '0.5',
       },
+      // dragOverlay: {
+      //   opacity: '0.1'
+      // }
     },
   }),
 };
+
 
 type Items = Record<UniqueIdentifier, UniqueIdentifier[]>;
 
@@ -165,7 +169,7 @@ export const TRASH_ID = 'void';
 const PLACEHOLDER_ID = 'placeholder';
 const empty: UniqueIdentifier[] = [];
 
-export function MultipleContainers({
+export const MultipleContainers = ({
   adjustScale = false,
   itemCount = 3,
   cancelDrop,
@@ -180,10 +184,11 @@ export function MultipleContainers({
   modifiers,
   renderItem,
   strategy = verticalListSortingStrategy,
-  trashable = false,
-  vertical = false,
-  scrollable,
-}: Props) {
+  trashable = false,                                        // ゴミ箱エリアの表示フラグ
+  vertical = false,                                         // コンテナの配置方向フラグ
+  scrollable,                                               // コンテナ内のスクロール有無フラグ（挙動未確認）
+}: Props) => {
+
   const [items, setItems] = useState<Items>(
     () =>
       initialItems ?? {
@@ -193,21 +198,19 @@ export function MultipleContainers({
         D: createRange(itemCount, (index) => `D${index + 1}`),
       }
   );
-  const [containers, setContainers] = useState(
-    Object.keys(items) as UniqueIdentifier[]
-  );
+
+  const [containers, setContainers] = useState(Object.keys(items) as UniqueIdentifier[]);
   const [activeId, setActiveId] = useState<UniqueIdentifier | null>(null);
   const lastOverId = useRef<UniqueIdentifier | null>(null);
   const recentlyMovedToNewContainer = useRef(false);
   const isSortingContainer = activeId ? containers.includes(activeId) : false;
 
   /**
-   * Custom collision detection strategy optimized for multiple containers
+   * 複数のコンテナ向けに最適化されたカスタム衝突検出戦略
    *
-   * - First, find any droppable containers intersecting with the pointer.
-   * - If there are none, find intersecting containers with the active draggable.
-   * - If there are no intersecting containers, return the last matched intersection
-   *
+   * - まず、ポインタと交差するドロップ可能なコンテナを探します。
+   * - ない場合は、アクティブなドラッグ可能なものと交差するコンテナを探します。
+   * - 交差するコンテナがない場合は、最後に一致した交差点を返します。
    */
   const collisionDetectionStrategy: CollisionDetection = useCallback(
     (args) => {
@@ -220,23 +223,27 @@ export function MultipleContainers({
         });
       }
 
-      // Start by finding any intersecting droppable
+      // まず、交差するドロップ可能オブジェクトを見つけます
       const pointerIntersections = pointerWithin(args);
-      const intersections =
-        pointerIntersections.length > 0
-          ? // If there are droppables intersecting with the pointer, return those
-          pointerIntersections
-          : rectIntersection(args);
+
+      // ポインタと重なるコンテナがある場合は、そのコンテナを返す（戻り値はコンテナ配列）
+      // ポインタと重なるコンテナが無い場合は、ドラッグ中のアイテムと一番重なり面積が多いコンテナを返す（戻り値はコンテナ配列）
+      const intersections = pointerIntersections.length > 0 ? pointerIntersections : rectIntersection(args);
+
+      // コンテナ配列の中で最初に重なったコンテナを返す
+      // 第二引数が指定されている場合、第二引数で指定した情報で返す
       let overId = getFirstCollision(intersections, 'id');
 
       if (overId != null) {
         if (overId === TRASH_ID) {
-          // If the intersecting droppable is the trash, return early
-          // Remove this if you're not using trashable functionality in your app
+          // 交差するドロップ可能なオブジェクトがゴミ箱の場合は、早期に返します。
+          // アプリでゴミ箱機能を使用していない場合は、これを削除してください。
           return intersections;
         }
 
         if (overId in items) {
+
+          // オーバーレイされたコンテナに存在するアイテム一覧を取得
           const containerItems = items[overId];
 
           // If a container is matched and it contains items (columns 'A', 'B', 'C')
@@ -258,10 +265,10 @@ export function MultipleContainers({
         return [{ id: overId }];
       }
 
-      // When a draggable item moves to a new container, the layout may shift
-      // and the `overId` may become `null`. We manually set the cached `lastOverId`
-      // to the id of the draggable item that was moved to the new container, otherwise
-      // the previous `overId` will be returned which can cause items to incorrectly shift positions
+      // ドラッグ可能なアイテムが新しいコンテナに移動すると、レイアウトが変わり、
+      // `overId` が `null` になることがあります。キャッシュされた `lastOverId` を、
+      // 新しいコンテナに移動されたドラッグ可能なアイテムの ID に手動で設定します。
+      // そうしないと、以前の `overId` が返され、アイテムの位置が誤ってシフトする可能性があります。
       if (recentlyMovedToNewContainer.current) {
         lastOverId.current = activeId;
       }
@@ -271,7 +278,9 @@ export function MultipleContainers({
     },
     [activeId, items]
   );
+
   const [clonedItems, setClonedItems] = useState<Items | null>(null);
+
   const sensors = useSensors(
     useSensor(MouseSensor),
     useSensor(TouchSensor),
@@ -279,7 +288,12 @@ export function MultipleContainers({
       coordinateGetter,
     })
   );
+
+
   const findContainer = (id: UniqueIdentifier) => {
+
+    // 引数で渡されるidはアイテムidとコンテナidの可能性がある。
+    // アイテムIDとコンテナIDの命名規則は区別する必要がある。（同じ命名規則だと、アイテムIDとコンテナIDが重複してしまう可能性があるため）
     if (id in items) {
       return id;
     }
@@ -287,6 +301,7 @@ export function MultipleContainers({
     return Object.keys(items).find((key) => items[key].includes(id));
   };
 
+  // 配列上のコンテナの位置(index)を取得
   const getIndex = (id: UniqueIdentifier) => {
     const container = findContainer(id);
 
@@ -299,7 +314,10 @@ export function MultipleContainers({
     return index;
   };
 
+  // ドラッグ操作がキャンセルされた場合に発火するイベントハンドラから呼び出される処理
+  // ただ、ドラッグ操作をキャンセルする方法が特定できない
   const onDragCancel = () => {
+    console.log('ドラッグ操作をキャンセルしたよ！')
     if (clonedItems) {
       // Reset items to their original state in case items have been
       // Dragged across containers
@@ -311,24 +329,40 @@ export function MultipleContainers({
   };
 
   useEffect(() => {
+
+    // スムーズなアニメーションやパフォーマンスの最適化
     requestAnimationFrame(() => {
       recentlyMovedToNewContainer.current = false;
     });
   }, [items]);
 
+
+  // ここからがJSX
   return (
     <DndContext
       sensors={sensors}
       collisionDetection={collisionDetectionStrategy}
+
+      // measuring：ドロップ可能なノードとドラッグ可能なノードを測定する方法を指定
+      // 測定：ノードのサイズや位置を特定することと予想。
+      // 公式説明ページでは「LayoutMeasuring」プロパティという名称になっているが、
+      // 実際は「measuring」にリファクタリンされている
+      // 公式説明ページが最新化されていない。
       measuring={{
         droppable: {
+
+          // ドラッグ開始前、ドラッグ開始直後、およびドラッグ終了後にドロップ可能な要素を測定します。
           strategy: MeasuringStrategy.Always,
         },
       }}
       onDragStart={({ active }) => {
         setActiveId(active.id);
+
+        // 2手前の動作時の配列を保持（なぜ、1手前じゃない？） 
         setClonedItems(items);
       }}
+
+
       onDragOver={({ active, over }) => {
         const overId = over?.id;
 
@@ -336,21 +370,33 @@ export function MultipleContainers({
           return;
         }
 
+        /**
+         * ドロップされたコンテナ
+         */
         const overContainer = findContainer(overId);
+
+        /**
+         * ドラッグアイテムが元々あったコンテナ
+         */
         const activeContainer = findContainer(active.id);
 
         if (!overContainer || !activeContainer) {
           return;
         }
 
+        // アイテムをコンテナ間で移動した場合、
         if (activeContainer !== overContainer) {
+
           setItems((items) => {
             const activeItems = items[activeContainer];
             const overItems = items[overContainer];
+
+            // ドラッグアイテムとドロップコンテナの位置取得
             const overIndex = overItems.indexOf(overId);
             const activeIndex = activeItems.indexOf(active.id);
 
             let newIndex: number;
+
 
             if (overId in items) {
               newIndex = overItems.length + 1;
@@ -358,36 +404,44 @@ export function MultipleContainers({
               const isBelowOverItem =
                 over &&
                 active.rect.current.translated &&
-                active.rect.current.translated.top >
-                over.rect.top + over.rect.height;
+                active.rect.current.translated.top > over.rect.top + over.rect.height;
 
               const modifier = isBelowOverItem ? 1 : 0;
 
-              newIndex =
-                overIndex >= 0 ? overIndex + modifier : overItems.length + 1;
+              newIndex = overIndex >= 0 ? overIndex + modifier : overItems.length + 1;
             }
 
             recentlyMovedToNewContainer.current = true;
 
+
+            // 「[キー]：値」のように、オブジェクト型のキーを[]で囲む表現は、「インデックスシグネチャ」と呼ばれる機能。
+            // オブジェクトのキーが事前に決まっていない動的なキー
             return {
               ...items,
+
+              // ドラッグアイテムが元々あったコンテナから、ドラッグアイテムを除外
               [activeContainer]: items[activeContainer].filter(
                 (item) => item !== active.id
               ),
+
+              // ドロップコンテナに、ドラッグアイテムを挿入
               [overContainer]: [
                 ...items[overContainer].slice(0, newIndex),
                 items[activeContainer][activeIndex],
-                ...items[overContainer].slice(
-                  newIndex,
-                  items[overContainer].length
-                ),
+                ...items[overContainer].slice(newIndex, items[overContainer].length),
               ],
             };
           });
         }
       }}
+
+
+
       onDragEnd={({ active, over }) => {
+
+        // コンテナをドラッグした場合
         if (active.id in items && over?.id) {
+
           setContainers((containers) => {
             const activeIndex = containers.indexOf(active.id);
             const overIndex = containers.indexOf(over.id);
@@ -396,6 +450,9 @@ export function MultipleContainers({
           });
         }
 
+        /**
+         * ドラッグアイテムが元々あったコンテナ
+         */
         const activeContainer = findContainer(active.id);
 
         if (!activeContainer) {
@@ -410,6 +467,7 @@ export function MultipleContainers({
           return;
         }
 
+        // ドロップ先がゴミ箱
         if (overId === TRASH_ID) {
           setItems((items) => ({
             ...items,
@@ -421,9 +479,18 @@ export function MultipleContainers({
           return;
         }
 
+
+        // ドロップ先がプレースホルダ
         if (overId === PLACEHOLDER_ID) {
           const newContainerId = getNextContainerId();
 
+
+          /**
+           * Reactが複数の状態更新を一度に処理するためのメソッド
+           * - 複数の状態変更があってもレンダリングを1回にまとめることができる
+           * - setContainersとsetItemsとsetActiveIdの更新を1回のレンダリングでまとめてくれる
+           * - !注意！名前に「unstable」がついている通り、APIは将来的に変更される可能性あり
+           */
           unstable_batchedUpdates(() => {
             setContainers((containers) => [...containers, newContainerId]);
             setItems((items) => ({
@@ -447,11 +514,9 @@ export function MultipleContainers({
           if (activeIndex !== overIndex) {
             setItems((items) => ({
               ...items,
-              [overContainer]: arrayMove(
-                items[overContainer],
-                activeIndex,
-                overIndex
-              ),
+
+              // arrayMove：新しい並びにした新しい配列を返す
+              [overContainer]: arrayMove(items[overContainer], activeIndex, overIndex),
             }));
           }
         }
@@ -461,6 +526,7 @@ export function MultipleContainers({
       cancelDrop={cancelDrop}
       onDragCancel={onDragCancel}
       modifiers={modifiers}
+    // modifiers={[restrictToParentElement]}
     >
       <div
         style={{
@@ -470,13 +536,10 @@ export function MultipleContainers({
           gridAutoFlow: vertical ? 'row' : 'column',
         }}
       >
+        {/* コンテナのソートエリア */}
         <SortableContext
           items={[...containers, PLACEHOLDER_ID]}
-          strategy={
-            vertical
-              ? verticalListSortingStrategy
-              : horizontalListSortingStrategy
-          }
+          strategy={vertical ? verticalListSortingStrategy : horizontalListSortingStrategy}
         >
           {containers.map((containerId) => (
             <DroppableContainer
@@ -490,6 +553,8 @@ export function MultipleContainers({
               unstyled={minimal}
               onRemove={() => handleRemove(containerId)}
             >
+
+              {/* タスクのソートエリア */}
               <SortableContext items={items[containerId]} strategy={strategy}>
                 {items[containerId].map((value, index) => {
                   return (
@@ -510,6 +575,8 @@ export function MultipleContainers({
               </SortableContext>
             </DroppableContainer>
           ))}
+
+          {/* コンテナ追加エリア */}
           {minimal ? undefined : (
             <DroppableContainer
               id={PLACEHOLDER_ID}
@@ -523,7 +590,11 @@ export function MultipleContainers({
           )}
         </SortableContext>
       </div>
+
+      {/* createPortal：DOM上の別の場所に子要素をレンダー */}
       {createPortal(
+
+        // DragOverlay：アイテムをドラッグしている間のスタイルをカスタマイズ
         <DragOverlay adjustScale={adjustScale} dropAnimation={dropAnimation}>
           {activeId
             ? containers.includes(activeId)
@@ -533,13 +604,18 @@ export function MultipleContainers({
         </DragOverlay>,
         document.body
       )}
+
       {trashable && activeId && !containers.includes(activeId) ? (
         <Trash id={TRASH_ID} />
       ) : null}
     </DndContext>
   );
 
+  // ドラッグ中のアイテムのデザインを指定
   function renderSortableItemDragOverlay(id: UniqueIdentifier) {
+
+    // console.log(renderItem)
+
     return (
       <Item
         value={id}
@@ -561,6 +637,7 @@ export function MultipleContainers({
     );
   }
 
+  // ドラッグ中のコンテナのデザインを指定
   function renderContainerDragOverlay(containerId: UniqueIdentifier) {
     return (
       <Container
@@ -568,6 +645,7 @@ export function MultipleContainers({
         columns={columns}
         style={{
           height: '100%',
+          // backgroundColor: 'red',
         }}
         shadow
         unstyled={false}
@@ -595,12 +673,14 @@ export function MultipleContainers({
     );
   }
 
+  // コンテナの削除
   function handleRemove(containerID: UniqueIdentifier) {
     setContainers((containers) =>
       containers.filter((id) => id !== containerID)
     );
   }
 
+  // コンテナの追加
   function handleAddColumn() {
     const newContainerId = getNextContainerId();
 
@@ -617,6 +697,7 @@ export function MultipleContainers({
     const containerIds = Object.keys(items);
     const lastContainerId = containerIds[containerIds.length - 1];
 
+    // 次のアルファベットを返す
     return String.fromCharCode(lastContainerId.charCodeAt(0) + 1);
   }
 }
@@ -676,6 +757,7 @@ interface SortableItemProps {
   wrapperStyle({ index }: { index: number }): React.CSSProperties;
 }
 
+// タスクアイテム
 function SortableItem({
   disabled,
   id,

@@ -35,6 +35,9 @@ $focused-outline-color: #4c9ffe;
   box-sizing: border-box;
   transform: translate3d(var(--translate-x, 0), var(--translate-y, 0), 0) scaleX(var(--scale-x, 1)) scaleY(var(--scale-y, 1));
   transform-origin: 0 0;
+
+  // パン(カメラの首を左右へ水平に動かす操作)およびズームのジェスチャーは有効。
+  // ダブルタップでのズームなど、標準外の追加的なジェスチャーを無効。
   touch-action: manipulation;
 
   &.fadeIn {

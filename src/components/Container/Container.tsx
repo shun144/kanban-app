@@ -22,6 +22,7 @@ export interface Props {
 }
 
 // forwardRef：関数コンポーネントにrefをアタッチできるようにするためのクラス
+// forwardRef<refで扱うインスタンスの型, コンポーネントの Props の型>
 export const Container = forwardRef<HTMLDivElement, Props>(
   (
     {
@@ -44,6 +45,7 @@ export const Container = forwardRef<HTMLDivElement, Props>(
   ) => {
     const Component = onClick ? "button" : "div";
 
+    // console.log(style)
     return (
       <Component
         {...props}
@@ -51,6 +53,7 @@ export const Container = forwardRef<HTMLDivElement, Props>(
         style={
           {
             ...style,
+            // コンテナ内のカラム数
             "--columns": columns
           } as React.CSSProperties
         }
